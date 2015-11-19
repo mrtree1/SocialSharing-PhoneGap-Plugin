@@ -5,6 +5,7 @@
 #import <MessageUI/MFMessageComposeViewController.h>
 #import <MessageUI/MFMailComposeViewController.h>
 #import <MobileCoreServices/MobileCoreServices.h>
+#import <MobileCoreServices/UTCoreTypes.h>
 
 @implementation SocialSharing {
   UIPopoverController *_popover;
@@ -67,6 +68,9 @@
         NSObject *file = [self getImage:filename];
         if (file == nil) {
           file = [self getFile:filename];
+        } else {
+          //ensure gifs go through
+          file = [NSDictionary dictionaryWithObjectsAndKeys:file, @"com.compuserve.gif",nil];
         }
         if (file != nil) {
           [files addObject:file];
@@ -241,6 +245,28 @@
     if (image != nil) {
       [composeViewController addImage:image];
     }
+      
+      //append images
+      /*if (filename != nil) {
+          if ([filename rangeOfString:@","].location == NSNotFound) {
+              //single image
+              UIImage* image = [self getImage:filename];
+              if (image != nil) {
+                  [composeViewController addImage:image];
+              }
+          } else {
+              NSArray *imageNames = [filename componentsSeparatedByString: @","];
+              for (NSString* imageName in imageNames) {
+                  UIImage* image = [self getImage:imageName];
+                  if (image != nil) {
+                      [composeViewController addImage:image];
+                  }
+              }
+              
+          }
+      }*/
+      
+      
   }
   
   if (urlString != (id)[NSNull null]) {
@@ -434,8 +460,210 @@
   }
 }
 
+- (bool)canShareViaMMS {
+    Class messageClass = (NSClassFromString(@"MFMessageComposeViewController"));
+    return messageClass != nil && [messageClass canSendAttachments];
+}
+
+- (void)shareViaMMS:(CDVInvokedUrlCommand*)command {
+    if ([self canShareViaMMS]) {
+        NSString* uti = (NSString*)kUTTypeMessage;
+        
+        MFMessageComposeViewController *picker = [[MFMessageComposeViewController alloc] init];
+        picker.messageComposeDelegate = self;
+        
+        NSString *imageName = [command.arguments objectAtIndex:0];
+        if ([imageName rangeOfString:@","].location == NSNotFound) {
+            //single image
+            if (![self isUrl:imageName]) {
+                NSData* image = [self getTextImageData:imageName];
+                [picker addAttachmentData:image typeIdentifier:uti filename:@"gabbleword.png"];
+            } else {
+                NSData* image = [self getImageData:imageName];
+                [picker addAttachmentData:image typeIdentifier:uti filename:@"gabble.gif"];
+            }
+        } else {
+            NSMutableArray *imageList = [[NSMutableArray alloc] init];
+            NSArray *imageNames = [imageName componentsSeparatedByString: @","];
+            for (NSString* imageName in imageNames) {
+                if (![self isUrl:imageName]) {
+                    NSData* image = [self getTextImageData:imageName];
+                    //NSDictionary *item = [NSDictionary dictionaryWithObjectsAndKeys:image,nil];
+                    
+                    [imageList addObject:image];
+                    [picker addAttachmentData:image typeIdentifier:uti filename:@"gabbleword.png"];
+                } else {
+                    NSData* image = [self getImageData:imageName];
+                    NSDictionary *item = [NSDictionary dictionaryWithObjectsAndKeys:image, @"com.compuserve.gif",nil];
+                    
+                    [imageList addObject:item];
+                    [picker addAttachmentData:image typeIdentifier:uti filename:@"gabble.gif"];
+                }
+            }
+        }
+        // remember the command, because we need it in the didFinishWithResult method
+        _command = command;
+        [self.viewController presentViewController:picker animated:YES completion:nil];
+    } else {
+        CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"not available"];
+        [self writeJavascript:[pluginResult toErrorCallbackString:command.callbackId]];
+    }
+}
+
+- (void)addEmailImage:(MFMailComposeViewController *)picker imageName:(NSString *)imageName {
+    //single image
+    if (![self isUrl:imageName]) {
+        NSData* image = [self getTextImageData:imageName];
+        [picker addAttachmentData:image mimeType:@"image/png" fileName:@"gabbleword.png"];
+        
+    } else {
+        NSData* image = [self getImageData:imageName];
+        [picker addAttachmentData:image mimeType:@"image/gif" fileName:@"gabble.gif"];
+    }
+}
+
+- (NSString*)addEmailHtmlItem:(NSString*)emailBody imageName:(NSString *)imageName {
+    //single image
+    NSString *itemStart = @"<li style='display:inline-block;text-align:center;margin:0 0 8px 8px;vertical-align:top;' ><div style='border-radius: 999px;background-color:#fff;border:2px solid #ccc;width:50px;height:50px;max-height:50px;";
+    NSString* itemSpan = @"' ><span style='display:block;height:50px;max-height:50px;line-height:50px; box-sizing:border-box;";
+    NSString* itemSpanEnd = @"' >";
+    
+    NSString *itemEnd = @"</span></div></li>";
+    if (![self isUrl:imageName]) {
+        NSString* divStyle=@"border-color: #e26e50 !important;";
+        NSString* spanStyle=@"padding:0;overflow:visible;";
+        NSUInteger textLength = imageName.length;
+        if (textLength > 10) {
+            spanStyle = [self stringAppend:spanStyle, @"font-size:xx-small;",nil];
+            imageName = [self stringAppend:[imageName substringToIndex:9],@"&#8230;",nil];//truncate
+        } else if (textLength > 8) {
+            spanStyle = [self stringAppend:spanStyle, @"font-size:xx-small;",nil];
+            
+        } else if (textLength > 6) {
+            spanStyle = [self stringAppend:spanStyle, @"font-size:x-small;",nil];
+            
+        } else if (textLength > 3) {
+            spanStyle = [self stringAppend:spanStyle, @"font-size:small;",nil];
+            
+        } else {
+            spanStyle = [self stringAppend:spanStyle, @"font-size:medium;",nil];
+        }
+        emailBody = [self stringAppend:emailBody, itemStart,divStyle,itemSpan,spanStyle,itemSpanEnd,imageName,itemEnd,nil];
+        
+    } else {
+        NSString* divStyle=@"border-color: #ccc;";
+        NSString* spanStyle=@"padding:15%;overflow:hidden;";
+        NSString* sizing = @"";
+        if ([imageName rangeOfString:@"gabble.com"].location != NSNotFound)
+            sizing = @"?w=50&h50";
+        emailBody = [self stringAppend:emailBody, itemStart,divStyle,itemSpan,spanStyle,itemSpanEnd, @"<img style='height:35px;max-height:35px;width:35px;border:0;vertical-align:middle;display:block;' src='",imageName,sizing,@"/>",itemEnd,nil];
+    }
+    
+    return emailBody;
+}
+
+- (NSString *) stringAppend:(id) first, ...
+{
+    NSString * result = @"";
+    id eachArg;
+    va_list alist;
+    if(first)
+    {
+        result = [result stringByAppendingString:first];
+        va_start(alist, first);
+        while ((eachArg = va_arg(alist, id)))
+            result = [result stringByAppendingString:eachArg];
+        va_end(alist);
+    }
+    return result;
+}
+
+- (void)shareViaEmail:(CDVInvokedUrlCommand*)command {
+    if ([self canShareViaMMS]) {
+        MFMailComposeViewController *mail = [[MFMailComposeViewController alloc] init];
+        mail.mailComposeDelegate = self;
+        
+        NSString *emailBody = @"<div style='padding:0;margin:0'><ul style='list-style:none;' >";
+        
+        NSString *imageName = [command.arguments objectAtIndex:0];
+        if ([imageName rangeOfString:@","].location == NSNotFound) {
+            //[self addEmailImage:mail imageName:imageName];
+            emailBody = [self addEmailHtmlItem:emailBody imageName:imageName];
+        } else {
+            NSArray *imageNames = [imageName componentsSeparatedByString: @","];
+            for (NSString* imageName in imageNames) {
+                //[self addEmailImage:mail imageName:imageName];
+                emailBody = [self addEmailHtmlItem:emailBody imageName:imageName];
+                
+            }
+        }
+        // remember the command, because we need it in the didFinishWithResult method
+        _command = command;
+        
+        emailBody = [self stringAppend:emailBody, @"</ul></div>",nil];
+        
+        [mail setMessageBody:emailBody isHTML:YES];
+        mail.modalPresentationStyle = UIModalPresentationPageSheet;
+        [self.viewController presentViewController:mail animated:YES completion:nil];
+    } else {
+        CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"not available"];
+        [self writeJavascript:[pluginResult toErrorCallbackString:command.callbackId]];
+    }
+}
+
+- (void)shareViaClipboard:(CDVInvokedUrlCommand*)command {
+    
+    UIPasteboard *pasteBoard=[UIPasteboard generalPasteboard];
+    
+    NSString *imageName = [command.arguments objectAtIndex:0];
+    if ([imageName rangeOfString:@","].location == NSNotFound) {
+        //single image
+        if (![self isUrl:imageName]) {
+            NSData* image = [self getTextImageData:imageName];
+            [pasteBoard setData:image forPasteboardType:@"public.png"];
+        } else {
+            NSData* image = [self getImageData:imageName];
+            [pasteBoard setData:image forPasteboardType:@"com.compuserve.gif"];
+        }
+        //NSArray* dict = [pasteBoard items];
+        //BOOL ok = dict.count > 0;
+    } else {
+        NSMutableArray *imageList = [[NSMutableArray alloc] init];
+        NSArray *imageNames = [imageName componentsSeparatedByString: @","];
+        for (NSString* imageName in imageNames) {
+            if (![self isUrl:imageName]) {
+                NSData* image = [self getTextImageData:imageName];
+                NSDictionary *item = [NSDictionary dictionaryWithObjectsAndKeys:image, @"public.png",nil];
+                [imageList addObject:item];
+            } else {
+                NSData* image = [self getImageData:imageName];
+                NSDictionary *item = [NSDictionary dictionaryWithObjectsAndKeys:image, @"com.compuserve.gif",nil];
+                [imageList addObject:item];
+            }
+        }
+        pasteBoard.items = imageList;
+        //BOOL ok = [pasteBoard items].count > 0;
+        
+    }
+    
+    // remember the command, because we need it in the didFinishWithResult method
+    _command = command;
+    
+    //CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:TRUE];
+    //[self writeJavascript:[pluginResult toSuccessCallbackString:_command.callbackId]];
+    
+    
+}
+
 // Dismisses the SMS composition interface when users taps Cancel or Send
 - (void)messageComposeViewController:(MFMessageComposeViewController *)controller didFinishWithResult:(MessageComposeResult)result {
+  bool ok = result == MessageComposeResultSent;
+  [[self getTopMostViewController] dismissViewControllerAnimated:YES completion:nil];
+  CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:ok];
+  [self.commandDelegate sendPluginResult:pluginResult callbackId:_command.callbackId];
+}
+
+- (void)mailComposeController:(MFMailComposeViewController *)controller didFinishWithResult:(MFMailComposeResult)result error:(NSError*)error {
   bool ok = result == MessageComposeResultSent;
   [[self getTopMostViewController] dismissViewControllerAnimated:YES completion:nil];
   CDVPluginResult * pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsBool:ok];
@@ -628,6 +856,75 @@
   return image;
 }
 
+-(NSData*)getImageData: (NSString *)imageName {
+    NSData *image = nil;
+    if (imageName != (id)[NSNull null]) {
+        if ([imageName rangeOfString:@"http"].location == 0) { // from the internet
+            image = [NSData dataWithContentsOfURL:[NSURL URLWithString:imageName]];
+        } else if ([imageName rangeOfString:@"www/"].location == 0) { // www folder
+            image = nil; //[UIImage imageNamed:imageName];
+        } else if ([imageName rangeOfString:@"file://"].location == 0) { // using file: protocol
+            image = [NSData dataWithContentsOfFile:[[NSURL URLWithString:imageName] path]];
+        } else if ([imageName rangeOfString:@"data:"].location == 0) {
+            // using a base64 encoded string
+            NSURL *imageURL = [NSURL URLWithString:imageName];
+            NSData *imageData = [NSData dataWithContentsOfURL:imageURL];
+            image = imageData;
+        } else {
+            // assume anywhere else, on the local filesystem
+            image = [NSData dataWithContentsOfFile:imageName];
+        }
+    }
+    return image;
+}
+
+-(NSData*)getTextImageData: (NSString *)text {
+    UIImage* background = [self getImage:@"www/img/word-frame.png"];
+    UIImage* textImage = [self drawText:text inImage:background atPoint:CGPointMake(50,50)];
+    NSData *imageData = [NSData dataWithData:UIImagePNGRepresentation(textImage)];
+    return imageData;
+}
+
+-(UIImage*) drawText:(NSString*) text
+             inImage:(UIImage*)  image
+             atPoint:(CGPoint)   point
+{
+    
+    UIGraphicsBeginImageContext(image.size);
+    [image drawInRect:CGRectMake(0,0,image.size.width,image.size.height)];
+    
+    /*CGRect rect = CGRectMake(point.x, point.y, image.size.width, image.size.height);
+     UIFont *font = [UIFont boldSystemFontOfSize:12];
+     NSDictionary *att = @{NSFontAttributeName:font};
+     [text drawInRect:rect withAttributes:att];*/
+    
+    UITextView *myText = [[UITextView alloc] init];
+    myText.font = [UIFont fontWithName:@"TrebuchetMS-Bold" size:15.0f];
+    myText.textColor = [UIColor blackColor];
+    myText.text = text;
+    myText.backgroundColor = [UIColor clearColor];
+    
+    NSAttributedString *attributedText = [[NSAttributedString alloc]initWithString:text
+                                                                        attributes:@{ NSFontAttributeName: myText.font }];
+    CGRect rect = [attributedText boundingRectWithSize:(CGSize){image.size.width-30, CGFLOAT_MAX}
+                                               options:NSStringDrawingUsesLineFragmentOrigin
+                                               context:nil];
+    CGSize expectedLabelSize = rect.size;
+    
+    myText.frame = CGRectMake((image.size.width / 2) - (expectedLabelSize.width / 2),
+                              (image.size.height / 2) - (expectedLabelSize.height / 2),
+                              expectedLabelSize.width,
+                              image.size.height);
+    
+    [[UIColor whiteColor] set];
+    NSDictionary *att = @{NSFontAttributeName:myText.font};
+    [myText.text drawInRect:myText.frame withAttributes:att];
+    UIImage *newImage = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    
+    return newImage;
+}
+
 -(NSURL*)getFile: (NSString *)fileName {
   NSURL *file = nil;
   if (fileName != (id)[NSNull null]) {
@@ -666,6 +963,10 @@
   [fileData writeToFile:filePath atomically:YES];
   _tempStoredFile = filePath;
   return filePath;
+}
+
+-(bool)isUrl: (NSString*) text {
+    return [text hasPrefix:@"http://"];
 }
 
 - (void) cleanupStoredFiles {

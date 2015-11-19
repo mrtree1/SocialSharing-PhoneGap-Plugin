@@ -1,7 +1,8 @@
 #import <Cordova/CDV.h>
+#import <MessageUI/MFMessageComposeViewController.h>
 #import <MessageUI/MFMailComposeViewController.h>
 
-@interface SocialSharing : CDVPlugin <UIPopoverControllerDelegate, MFMailComposeViewControllerDelegate, UIDocumentInteractionControllerDelegate>
+@interface SocialSharing : CDVPlugin <UIPopoverControllerDelegate, MFMailComposeViewControllerDelegate, MFMessageComposeViewControllerDelegate, UIDocumentInteractionControllerDelegate>
 
 @property (nonatomic, strong) MFMailComposeViewController *globalMailComposer;
 @property (retain) UIDocumentInteractionController * documentInteractionController;
@@ -21,6 +22,9 @@
 - (void)shareViaSMS:(CDVInvokedUrlCommand*)command;
 - (void)shareViaEmail:(CDVInvokedUrlCommand*)command;
 - (void)shareViaInstagram:(CDVInvokedUrlCommand*)command;
+
+- (void)shareViaMMS:(CDVInvokedUrlCommand*)command;
+- (void)shareViaClipboard:(CDVInvokedUrlCommand*)command;
 
 - (void)saveToPhotoAlbum:(CDVInvokedUrlCommand*)command;
 
